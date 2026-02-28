@@ -81,90 +81,108 @@ const ACCEPT_CMDS = [
 // ══════════════════════════════════════════════════════════════════
 
 export function activate(ctx: vscode.ExtensionContext) {
-    out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-    log('v4.0 activated');
-    loadConfig();
+    try {
+        out = vscode.window.createOutputChannel('AG Super Auto-Accept');
+        log('v4.1.2 activated');
+        loadConfig();
 
-    // Status bars
-    statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
-    statusBar.command = 'agSuper.toggle';
-    ctx.subscriptions.push(statusBar);
+        // Status bars
+        statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
+        statusBar.command = 'agSuper.toggle';
+        ctx.subscriptions.push(statusBar);
 
-    godModeBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 9999);
-    godModeBar.command = 'agSuper.toggleGodMode';
-    ctx.subscriptions.push(godModeBar);
+        godModeBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 9999);
+        godModeBar.command = 'agSuper.toggleGodMode';
+        ctx.subscriptions.push(godModeBar);
 
-    // Restore states
-    enabled = ctx.globalState.get('agSuperEnabled', true);
-    godMode = ctx.globalState.get('agSuperGodMode', false);
-    updateStatusBar();
-    updateGodModeBar();
-    statusBar.show();
-    godModeBar.show();
+        // Restore states
+        enabled = ctx.globalState.get('agSuperEnabled', true);
+        godMode = ctx.globalState.get('agSuperGodMode', false);
+        updateStatusBar();
+        updateGodModeBar();
+        statusBar.show();
+        godModeBar.show();
 
-    // Commands
-    ctx.subscriptions.push(
-        vscode.commands.registerCommand('agSuper.toggle', () => {
-            enabled = !enabled;
-            ctx.globalState.update('agSuperEnabled', enabled);
-            if (enabled) {
-                registerEvents();
-                startHeartbeat();
-                transitionTo(State.FAST, 'toggle');
-                vscode.window.showInformationMessage('AG Auto-Accept: ON ✅');
-            } else {
-                clearAll();
-                disposeEvents();
-                cdpDisconnect();
-                state = State.IDLE;
-                vscode.window.showInformationMessage('AG Auto-Accept: OFF 🛑');
+        // Commands
+        ctx.subscriptions.push(
+            vscode.commands.registerCommand('agSuper.toggle', () => {
+                enabled = !enabled;
+                ctx.globalState.update('agSuperEnabled', enabled);
+                if (enabled) {
+                    registerEvents();
+                    startHeartbeat();
+                    transitionTo(State.FAST, 'toggle');
+                    vscode.window.showInformationMessage('AG Auto-Accept: ON ✅');
+                } else {
+                    clearAll();
+                    disposeEvents();
+                    cdpDisconnect();
+                    state = State.IDLE;
+                    vscode.window.showInformationMessage('AG Auto-Accept: OFF 🛑');
+                }
+                updateStatusBar();
+            }),
+            vscode.commands.registerCommand('agSuper.toggleGodMode', () => {
+                godMode = !godMode;
+                ctx.globalState.update('agSuperGodMode', godMode);
+                updateGodModeBar();
+                vscode.window.showInformationMessage(
+                    godMode ? '⚠️ God Mode ON — folder access auto-allowed' : '🛡️ God Mode OFF'
+                );
+            }),
+            vscode.commands.registerCommand('agSuper.forceAccept', async () => {
+                log('Force accept triggered');
+                await tryAcceptAll();
+                vscode.window.showInformationMessage('Force accept executed');
+            }),
+            vscode.commands.registerCommand('agSuper.showLog', () => out.show())
+        );
+
+        // Config change
+        ctx.subscriptions.push(
+            vscode.workspace.onDidChangeConfiguration(e => {
+                if (e.affectsConfiguration('agAutoAccept')) {
+                    loadConfig();
+                    if (enabled) startHeartbeat();
+                }
+            })
+        );
+
+        // Auto-start
+        if (enabled) {
+            registerEvents();
+            startHeartbeat();
+            startSleepDetection();
+            // Delayed start: give AG time to register commands
+            setTimeout(() => {
+                verifyCommands();
+                transitionTo(State.FAST, 'activate');
+            }, 3000);
+
+            // Auto-setup CDP (best-effort, never crash on failure)
+            if (cfg.enableCDP) {
+                try { ensureDebugPort(); } catch (e: any) {
+                    log(`[CDP] ensureDebugPort failed: ${e?.message}`);
+                }
             }
-            updateStatusBar();
-        }),
-        vscode.commands.registerCommand('agSuper.toggleGodMode', () => {
-            godMode = !godMode;
-            ctx.globalState.update('agSuperGodMode', godMode);
-            updateGodModeBar();
-            vscode.window.showInformationMessage(
-                godMode ? '⚠️ God Mode ON — folder access auto-allowed' : '🛡️ God Mode OFF'
-            );
-        }),
-        vscode.commands.registerCommand('agSuper.forceAccept', async () => {
-            log('Force accept triggered');
-            await tryAcceptAll();
-            vscode.window.showInformationMessage('Force accept executed');
-        }),
-        vscode.commands.registerCommand('agSuper.showLog', () => out.show())
-    );
-
-    // Config change
-    ctx.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('agAutoAccept')) {
-                loadConfig();
-                if (enabled) startHeartbeat();
-            }
-        })
-    );
-
-    // Auto-start
-    if (enabled) {
-        registerEvents();
-        startHeartbeat();
-        startSleepDetection();
-        // Delayed start: give AG time to register commands
-        setTimeout(() => {
-            verifyCommands();
-            transitionTo(State.FAST, 'activate');
-        }, 3000);
-
-        // Auto-setup CDP
-        if (cfg.enableCDP) {
-            ensureDebugPort(); // best-effort argv.json setup for next restart
         }
-    }
 
-    log('Ready');
+        log('Ready');
+    } catch (e: any) {
+        // Last resort: if activation itself crashes, log to console so it shows in Extension Host log
+        const msg = `GravityPilot activation error: ${e?.message || e}`;
+        console.error(msg, e);
+        try { out?.appendLine(msg); } catch { }
+        // Still try to show status bar so user knows something went wrong
+        try {
+            if (statusBar) {
+                statusBar.text = '$(error) AG: ERROR';
+                statusBar.tooltip = msg;
+                statusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+                statusBar.show();
+            }
+        } catch { }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -224,19 +242,37 @@ function clearAll() {
 // Event Listeners
 // ══════════════════════════════════════════════════════════════════
 
+function invalidateCaches(reason: string) {
+    // Invalidate gRPC cache so we rediscover the (possibly new) language server
+    grpcServer = null;
+    grpcCacheTime = 0;
+    // Disconnect CDP so we reconnect to fresh targets
+    cdpDisconnect();
+    log(`Caches invalidated (${reason})`);
+}
+
 function registerEvents() {
     disposeEvents();
     const wake = (name: string) => () => { if (enabled) transitionTo(State.FAST, name); };
 
     events = [
         vscode.window.onDidChangeActiveTerminal(wake('terminal')),
-        vscode.window.onDidOpenTerminal(wake('terminalOpen')),
+        vscode.window.onDidOpenTerminal(t => {
+            // A new terminal opening after restart means fresh AG session
+            invalidateCaches('terminalOpen');
+            if (enabled) transitionTo(State.FAST, 'terminalOpen');
+        }),
         vscode.window.onDidCloseTerminal(wake('terminalClose')),
         vscode.window.onDidChangeVisibleTextEditors(wake('editorsChanged')),
         vscode.window.onDidChangeActiveTextEditor(wake('editorChanged')),
         vscode.window.onDidChangeWindowState(e => {
             windowFocused = e.focused;
-            if (e.focused && enabled) transitionTo(State.FAST, 'windowFocused');
+            if (e.focused && enabled) {
+                // Window regaining focus after account switch/restart:
+                // invalidate caches so we rediscover the new language server
+                invalidateCaches('windowFocused');
+                transitionTo(State.FAST, 'windowFocused');
+            }
         }),
         vscode.workspace.onDidChangeTextDocument(() => {
             if (!enabled) return;
@@ -411,7 +447,7 @@ async function layer3_VSCode() {
 // ══════════════════════════════════════════════════════════════════
 
 async function discoverServer() {
-    if (grpcServer && Date.now() - grpcCacheTime < 300000) return grpcServer;
+    if (grpcServer && Date.now() - grpcCacheTime < 60000) return grpcServer;
 
     try {
         const procs = await findLanguageServerProcesses();

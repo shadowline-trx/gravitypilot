@@ -2,7 +2,7 @@
   "name": "gravitypilot",
   "displayName": "GravityPilot",
   "description": "Ultimate 3-layer auto-accept for Antigravity — gRPC + CDP WebSocket + VS Code commands. Zero freezes, zero focus-stealing.",
-  "version": "4.1.1",
+  "version": "4.1.2",
   "icon": "icon.png",
   "publisher": "shadowline-trx",
   "license": "MIT",

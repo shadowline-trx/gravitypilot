@@ -2,6 +2,15 @@
 
 All notable changes to GravityPilot are documented here.
 
+## [4.1.2] - 2026-02-28
+
+### Fixed
+
+- **Account switch recovery**: gRPC cache (CSRF token + port) and CDP WebSocket connections are now automatically invalidated when the window regains focus or a new terminal opens — fixes the extension silently failing after account switch + restart
+- **gRPC cache TTL**: Reduced from 5 minutes to 60 seconds so stale server info expires faster
+- **Activation crash resilience**: `activate()` wrapped in try-catch; if anything fails, status bar shows `AG: ERROR` with the error message instead of silently not loading
+- **`ensureDebugPort()` safety**: CDP argv.json setup can no longer crash the entire extension on corrupt files
+
 ## [4.1.0] - 2026-02-28
 
 ### Added
