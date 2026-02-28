@@ -25,7 +25,7 @@
 
 ## Why GravityPilot?
 
-Other auto-accept extensions freeze your system with 100% RAM/disk usage, steal focus every few seconds, or simply don't work. GravityPilot was built by **reverse-engineering 4 competing extensions** and combining the best technique from each into one lightweight, battle-tested solution.
+Other auto-accept extensions freeze your system with 100% RAM/disk usage, steal focus every few seconds, or simply don't work. GravityPilot was built from the ground up to provide a robust, lightweight, and battle-tested solution.
 
 | Problem (other extensions) | GravityPilot Solution |
 | --- | --- |
@@ -176,21 +176,33 @@ Fires all known Antigravity accept commands via `Promise.allSettled` — non-blo
 
 ## 🤝 Contributing
 
-1. Fork this repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -m 'Add my feature'`
-4. Push: `git push origin feature/my-feature`
-5. Open a Pull Request
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, commit conventions, and the Developer Certificate of Origin (DCO).
+
+All contributors must sign off their commits (`git commit -s`) per the DCO.
 
 ---
 
-## 📝 License
+## 📋 Governance & Legal
 
-[MIT](LICENSE) © theha
+| Document | Description |
+| --- | --- |
+| [LICENSE](LICENSE) | MIT License |
+| [NOTICE](NOTICE) | Attribution and third-party notices |
+| [PRIVACY.md](PRIVACY.md) | Privacy policy (zero data collection) |
+| [SECURITY.md](SECURITY.md) | Security policy and vulnerability reporting |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Contributor Covenant v2.1 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines and DCO |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
+
+---
+
+## ⚖️ Disclaimer
+
+This extension is **not affiliated with, endorsed by, or supported by** Antigravity, Google, or any other company. It is an independent, community-created productivity tool. See [NOTICE](NOTICE) for full attribution.
 
 ---
 
 <p align="center">
-  Built by reverse-engineering 4 competing extensions and combining the best of each.<br>
+  Built from the ground up for ultimate performance and reliability.<br>
   <strong>GravityPilot — autopilot for Antigravity.</strong>
 </p>

@@ -1,0 +1,35 @@
+NOTICES AND ATTRIBUTION
+=======================
+
+GravityPilot is an original work written from scratch by theha.
+
+THIRD-PARTY DEPENDENCIES
+-------------------------
+
+This extension uses the following open-source dependencies:
+
+- ws (MIT License)
+  <https://github.com/websockets/ws>
+  Copyright (c) 2011 Einar Otto Stangvik
+
+All other dependencies are development-only and not shipped with the
+packaged extension.
+
+CHROME DEVTOOLS PROTOCOL
+------------------------
+
+This extension uses the Chrome DevTools Protocol (CDP), which is a public,
+documented debugging protocol. Usage of CDP does not require any special
+license or agreement. Documentation:
+<https://chromedevtools.github.io/devtools-protocol/>
+
+DISCLAIMER
+----------
+
+This extension is NOT affiliated with, endorsed by, or supported by
+Antigravity, Google, or any other company listed above.
+It is an independent, community-created tool.
+
+USE AT YOUR OWN RISK. The authors are not responsible for any consequences
+of using this extension, including but not limited to: data loss, system
+instability, or violation of Antigravity's terms of service.
