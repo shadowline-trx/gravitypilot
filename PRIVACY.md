@@ -32,4 +32,4 @@ If this privacy policy changes, the updated version will be published in this re
 
 ## Contact
 
-For questions about this privacy policy, please open an issue on the [GitHub repository](https://github.com/theha/gravitypilot/issues).
+For questions about this privacy policy, please open an issue on the [GitHub repository](https://github.com/shadowline-trx/gravitypilot/issues).

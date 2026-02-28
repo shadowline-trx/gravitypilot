@@ -123,7 +123,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/theha/gravitypilot/issues)
+- Use [GitHub Issues](https://github.com/shadowline-trx/gravitypilot/issues)
 - Include your VS Code/Antigravity version
 - Include relevant logs from the Output Channel
 - For security vulnerabilities, see [SECURITY.md](SECURITY.md)

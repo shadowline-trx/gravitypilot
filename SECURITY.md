@@ -12,7 +12,7 @@
 If you discover a security vulnerability in GravityPilot, please report it responsibly:
 
 1. **DO NOT** open a public GitHub issue for security vulnerabilities
-2. Email: [theha@users.noreply.github.com](mailto:theha@users.noreply.github.com)
+2. Email: [shadowline-trx@users.noreply.github.com](mailto:shadowline-trx@users.noreply.github.com)
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce

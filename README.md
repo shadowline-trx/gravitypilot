@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=theha.gravitypilot">
-    <img src="https://img.shields.io/visual-studio-marketplace/v/theha.gravitypilot?style=flat-square&color=00b4d8" alt="Version">
+  <a href="https://marketplace.visualstudio.com/items?itemName=shadowline-trx.gravitypilot">
+    <img src="https://img.shields.io/visual-studio-marketplace/v/shadowline-trx.gravitypilot?style=flat-square&color=00b4d8" alt="Version">
   </a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=theha.gravitypilot">
-    <img src="https://img.shields.io/visual-studio-marketplace/i/theha.gravitypilot?style=flat-square&color=0077b6" alt="Installs">
+  <a href="https://marketplace.visualstudio.com/items?itemName=shadowline-trx.gravitypilot">
+    <img src="https://img.shields.io/visual-studio-marketplace/i/shadowline-trx.gravitypilot?style=flat-square&color=0077b6" alt="Installs">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
@@ -98,7 +98,7 @@ IDLE ──(event)──→ FAST ──(10s)──→ SLOW ──(30s)──→ 
 
 ### From VSIX
 
-1. Download the `.vsix` from [Releases](https://github.com/theha/gravitypilot/releases)
+1. Download the `.vsix` from [Releases](https://github.com/shadowline-trx/gravitypilot/releases)
 2. Extensions → `...` → **Install from VSIX**
 3. **Restart the IDE**
 

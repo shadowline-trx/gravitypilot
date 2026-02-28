@@ -4,15 +4,15 @@
   "description": "Ultimate 3-layer auto-accept for Antigravity — gRPC + CDP WebSocket + VS Code commands. Zero freezes, zero focus-stealing.",
   "version": "4.1.0",
   "icon": "icon.png",
-  "publisher": "theha",
+  "publisher": "shadowline-trx",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/theha/gravitypilot"
+    "url": "https://github.com/shadowline-trx/gravitypilot"
   },
-  "homepage": "https://github.com/theha/gravitypilot#readme",
+  "homepage": "https://github.com/shadowline-trx/gravitypilot#readme",
   "bugs": {
-    "url": "https://github.com/theha/gravitypilot/issues"
+    "url": "https://github.com/shadowline-trx/gravitypilot/issues"
   },
   "keywords": [
     "antigravity",
