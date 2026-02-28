@@ -2,11 +2,14 @@
 .vscode-test/**
 src/**
 .gitignore
+.git/**
 tsconfig.json
 **/*.map
 **/*.ts
-node_modules/**
+!node_modules/ws/**
 test_accept.txt
 *.vsix
 .DS_Store
 Thumbs.db
+extracted_*/**
+mstrvn/**

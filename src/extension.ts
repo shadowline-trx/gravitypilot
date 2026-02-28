@@ -42,9 +42,12 @@ let sleepTimer: ReturnType<typeof setInterval> | undefined;
 let textChangeTimer: ReturnType<typeof setTimeout> | undefined;
 let events: vscode.Disposable[] = [];
 
-// CDP — scan multiple ports like mstrvn/auto-run-pro
-const CDP_PORTS = [9222, 9229, ...Array.from({ length: 18 }, (_, i) => 8997 + i)];
+// CDP — persistent connections like mstrvn
+const CDP_PORTS = [9222, 9229, ...Array.from({ length: 7 }, (_, i) => 8997 + i)];
 let cdpPortFound: number | null = null;
+let cdpConnections: Map<string, { ws: WebSocket; id: string }> = new Map();
+let cdpMsgId = 1;
+let cdpReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 // gRPC server cache
 let grpcServer: { port: number; csrfToken: string; useHttps: boolean } | null = null;
@@ -348,69 +351,50 @@ async function layer1_gRPC() {
     }
 }
 
-// ─── Layer 2: CDP DOM (multi-port scan, all-target evaluation) ────
+// ─── Layer 2: CDP DOM (persistent WS, mstrvn-style) ──────────────
 
 async function layer2_CDP() {
     if (!cfg.enableCDP) return;
 
-    const safeTexts = ['run', 'accept', 'accept all', 'continue', 'proceed', 'allow once'];
-    const unsafeTexts = godMode ? ['always allow', 'allow this conversation', 'allow'] : [];
-    const allTexts = [...safeTexts, ...unsafeTexts];
+    // Ensure we have active connections
+    await cdpEnsureConnections();
+
+    if (cdpConnections.size === 0) return;
+
+    const safePatterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'continue', 'proceed'];
+    const unsafePatterns = godMode ? ['always allow', 'allow this conversation', 'allow'] : [];
+    const allPatterns = [...safePatterns, ...unsafePatterns];
+    const rejectPatterns = ['skip', 'reject', 'cancel', 'close', 'refine', 'always run'];
 
     const script = `
 (function() {
-    if (!document.querySelector('.react-app-container') &&
-        !document.querySelector('[class*="agent"]') &&
-        !document.querySelector('[data-vscode-context]')) {
-        return 'not-agent-panel';
-    }
-    var TEXTS = ${JSON.stringify(allTexts)};
+    var PATTERNS = ${JSON.stringify(allPatterns)};
+    var REJECTS = ${JSON.stringify(rejectPatterns)};
     var clicked = 0;
     var buttons = document.querySelectorAll('button');
     for (var i = 0; i < buttons.length; i++) {
         var btn = buttons[i];
-        var text = '';
-        for (var j = 0; j < btn.childNodes.length; j++) {
-            if (btn.childNodes[j].nodeType === 3) text += btn.childNodes[j].textContent;
-        }
-        text = text.trim().toLowerCase();
+        var text = (btn.textContent || '').trim().toLowerCase();
         if (!text || text.length > 50) continue;
-        if (btn.offsetParent === null) continue;
-        var matched = false;
-        for (var k = 0; k < TEXTS.length; k++) {
-            if (text === TEXTS[k] || text.startsWith(TEXTS[k] + ' alt+') || text.startsWith(TEXTS[k] + ' ctrl+') ||
-                (TEXTS[k] === 'accept' && text.startsWith('accept'))) {
-                matched = true; break;
-            }
-        }
-        if (matched) { btn.click(); clicked++; }
+        if (btn.disabled) continue;
+        var style = window.getComputedStyle(btn);
+        var rect = btn.getBoundingClientRect();
+        if (style.display === 'none' || rect.width === 0 || style.pointerEvents === 'none') continue;
+        if (REJECTS.some(function(r) { return text.includes(r); })) continue;
+        if (!PATTERNS.some(function(p) { return text.includes(p); })) continue;
+        btn.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
+        clicked++;
     }
-    return 'clicked:' + clicked;
+    return clicked;
 })()`;
 
-    // Scan ports to find active CDP endpoint
-    const portsToTry = cdpPortFound ? [cdpPortFound, ...CDP_PORTS.filter(p => p !== cdpPortFound)] : CDP_PORTS;
-
-    for (const port of portsToTry) {
+    for (const [id, conn] of cdpConnections) {
         try {
-            const pages = await cdpGetPages(port);
-            if (pages.length === 0) continue;
-            cdpPortFound = port; // cache working port
-
-            // Evaluate on ALL targets — webview guard handles isolation
-            for (const page of pages) {
-                try {
-                    const result = await cdpEvaluateOnce(page.webSocketDebuggerUrl, script);
-                    if (result && typeof result === 'string' && result.startsWith('clicked:')) {
-                        const count = parseInt(result.split(':')[1], 10);
-                        if (count > 0) {
-                            log(`[CDP] ✓ ${result} on port ${port}`);
-                        }
-                    }
-                } catch { /* skip target */ }
+            const result = await cdpEvaluate(conn.ws, script);
+            if (result && result > 0) {
+                log(`[CDP] ✓ Clicked ${result} button(s) on ${id}`);
             }
-            return; // found correct port, stop scanning
-        } catch { /* port not open */ }
+        } catch { /* target may have closed */ }
     }
 }
 
@@ -548,11 +532,11 @@ async function findListeningPorts(pid: number): Promise<number[]> {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// CDP Helpers (scan multiple ports, fresh WS per eval like auto-run-pro)
+// CDP Helpers (persistent WS connections like mstrvn)
 // ══════════════════════════════════════════════════════════════════
 
 function cdpGetPages(port: number): Promise<any[]> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const req = http.get({ hostname: '127.0.0.1', port, path: '/json/list', timeout: 500 }, res => {
             let body = '';
             res.on('data', (c: Buffer) => body += c);
@@ -568,26 +552,74 @@ function cdpGetPages(port: number): Promise<any[]> {
     });
 }
 
-function cdpEvaluateOnce(wsUrl: string, expression: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const ws = new WebSocket(wsUrl);
-        const timeout = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 2000);
-        ws.on('open', () => {
-            ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression } }));
-        });
-        ws.on('message', (data: WebSocket.Data) => {
-            const msg = JSON.parse(data.toString());
-            if (msg.id === 1) {
-                clearTimeout(timeout);
-                ws.close();
-                resolve(msg.result?.result?.value || '');
+async function cdpEnsureConnections() {
+    const portsToTry = cdpPortFound ? [cdpPortFound, ...CDP_PORTS.filter(p => p !== cdpPortFound)] : CDP_PORTS;
+
+    for (const port of portsToTry) {
+        try {
+            const pages = await cdpGetPages(port);
+            if (pages.length === 0) continue;
+            cdpPortFound = port;
+
+            for (const page of pages) {
+                const id = `${port}:${page.id}`;
+                if (cdpConnections.has(id)) continue;
+
+                try {
+                    const ws = new WebSocket(page.webSocketDebuggerUrl);
+                    await new Promise<void>((resolve, reject) => {
+                        const timeout = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 2000);
+                        ws.on('open', () => {
+                            clearTimeout(timeout);
+                            cdpConnections.set(id, { ws, id });
+                            log(`[CDP] Connected to ${id}`);
+                            resolve();
+                        });
+                        ws.on('error', () => { clearTimeout(timeout); reject(new Error('ws-error')); });
+                    });
+                    ws.on('close', () => {
+                        cdpConnections.delete(id);
+                        log(`[CDP] Disconnected from ${id}`);
+                    });
+                    ws.on('error', () => { });
+                } catch { /* skip this target */ }
             }
-        });
-        ws.on('error', () => { clearTimeout(timeout); reject(new Error('ws-error')); });
+
+            if (cdpConnections.size > 0) return; // connected, stop scanning
+        } catch { /* port not open */ }
+    }
+}
+
+function cdpEvaluate(ws: WebSocket, expression: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        if (ws.readyState !== WebSocket.OPEN) return reject(new Error('not open'));
+        const id = cdpMsgId++;
+        const timeout = setTimeout(() => reject(new Error('timeout')), 2000);
+        const onMessage = (data: WebSocket.Data) => {
+            try {
+                const msg = JSON.parse(data.toString());
+                if (msg.id === id) {
+                    ws.off('message', onMessage);
+                    clearTimeout(timeout);
+                    resolve(msg.result?.result?.value);
+                }
+            } catch { }
+        };
+        ws.on('message', onMessage);
+        ws.send(JSON.stringify({
+            id,
+            method: 'Runtime.evaluate',
+            params: { expression, userGesture: true, awaitPromise: false, returnByValue: true }
+        }));
     });
 }
 
 function cdpDisconnect() {
+    if (cdpReconnectTimer) { clearTimeout(cdpReconnectTimer); cdpReconnectTimer = null; }
+    for (const [id, conn] of cdpConnections) {
+        try { conn.ws.close(); } catch { }
+    }
+    cdpConnections.clear();
     cdpPortFound = null;
 }
 
