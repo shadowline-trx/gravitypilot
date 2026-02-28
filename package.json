@@ -1,0 +1,140 @@
+{
+  "name": "gravitypilot",
+  "displayName": "GravityPilot",
+  "description": "Ultimate 3-layer auto-accept for Antigravity — gRPC + CDP WebSocket + VS Code commands. Zero freezes, zero focus-stealing.",
+  "version": "4.1.0",
+  "icon": "icon.png",
+  "publisher": "theha",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theha/gravitypilot"
+  },
+  "homepage": "https://github.com/theha/gravitypilot#readme",
+  "bugs": {
+    "url": "https://github.com/theha/gravitypilot/issues"
+  },
+  "keywords": [
+    "antigravity",
+    "auto-accept",
+    "auto-run",
+    "agent",
+    "ai",
+    "copilot",
+    "automation",
+    "cdp",
+    "grpc",
+    "productivity"
+  ],
+  "galleryBanner": {
+    "color": "#0a1628",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agSuper.toggle",
+        "title": "GravityPilot: Toggle ON/OFF"
+      },
+      {
+        "command": "agSuper.toggleGodMode",
+        "title": "GravityPilot: Toggle God Mode"
+      },
+      {
+        "command": "agSuper.forceAccept",
+        "title": "GravityPilot: Force Accept Now"
+      },
+      {
+        "command": "agSuper.showLog",
+        "title": "GravityPilot: Show Log"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "agSuper.toggle",
+        "key": "ctrl+alt+shift+y",
+        "mac": "cmd+alt+shift+y"
+      },
+      {
+        "command": "agSuper.forceAccept",
+        "key": "ctrl+alt+shift+a",
+        "mac": "cmd+alt+shift+a"
+      }
+    ],
+    "configuration": {
+      "title": "GravityPilot",
+      "properties": {
+        "agAutoAccept.fastIntervalMs": {
+          "type": "number",
+          "default": 500,
+          "minimum": 200,
+          "description": "Polling interval (ms) in FAST mode — after events."
+        },
+        "agAutoAccept.slowIntervalMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 1000,
+          "description": "Polling interval (ms) in SLOW mode."
+        },
+        "agAutoAccept.heartbeatIntervalMs": {
+          "type": "number",
+          "default": 8000,
+          "minimum": 3000,
+          "description": "Heartbeat interval (ms) in IDLE mode."
+        },
+        "agAutoAccept.fastDurationMs": {
+          "type": "number",
+          "default": 10000,
+          "description": "How long FAST mode lasts before dropping to SLOW."
+        },
+        "agAutoAccept.cooldownDurationMs": {
+          "type": "number",
+          "default": 30000,
+          "description": "How long SLOW mode lasts before dropping to IDLE."
+        },
+        "agAutoAccept.enableCDP": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable CDP WebSocket layer for clicking agent panel buttons directly."
+        },
+        "agAutoAccept.cdpPort": {
+          "type": "number",
+          "default": 9222,
+          "description": "Primary CDP port (additional ports 8997–9014 are always scanned)."
+        },
+        "agAutoAccept.debugMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log verbose debug information to the Output Channel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "18.x",
+    "@types/vscode": "^1.80.0",
+    "@types/ws": "^8.18.1",
+    "@vscode/vsce": "^2.19.0",
+    "typescript": "^5.1.3"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}
