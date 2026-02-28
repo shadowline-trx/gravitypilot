@@ -2,6 +2,18 @@
 
 All notable changes to GravityPilot are documented here.
 
+## [4.2.0] - 2026-02-28
+
+### Added
+
+- **Auto-Scroll**: CDP Layer 2 now clicks Antigravity's built-in "Scroll to bottom" button before each button scan cycle, ensuring off-screen accept/run buttons are revealed and clickable — directly inspired by mstrvn's proven approach
+- **Async CDP evaluation**: Switched to `awaitPromise: true` for reliable async script execution in the browser context
+
+### Changed
+
+- **CDP timeout**: Increased from 2s to 4s to accommodate the 300ms scroll animation delay
+- **CDP script**: Converted from synchronous IIFE to async function for proper scroll-then-scan sequencing
+
 ## [4.1.2] - 2026-02-28
 
 ### Fixed

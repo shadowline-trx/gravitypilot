@@ -40,11 +40,14 @@ Other auto-accept extensions freeze your system with 100% RAM/disk usage, steal 
 ## ✨ Features
 
 - **3-Layer Accept Architecture** — gRPC + CDP WebSocket + VS Code commands
+- **Auto-Scroll** — Automatically scrolls the agent panel to reveal off-screen accept buttons before each scan
 - **Event-Driven State Machine** — IDLE → FAST → SLOW, only polls hard when activity is detected
 - **Multi-Port CDP Scanning** — Auto-discovers the active debug port across 20+ candidates
 - **God Mode** — Auto-allow folder access and permission prompts (toggle via status bar)
 - **Auto-CDP Setup** — Configures `argv.json` automatically on first run
 - **Sleep/Lock Recovery** — Detects system sleep and resumes instantly
+- **Account Switch Recovery** — Automatically reconnects after Antigravity account changes
+- **Crash-Resilient Activation** — Shows `AG: ERROR` in status bar instead of silently failing
 - **Force Accept** — `Ctrl+Alt+Shift+A` to accept everything immediately
 - **Log Capping** — Auto-clears output at 100 lines to prevent memory growth
 
@@ -166,7 +169,7 @@ Discovers the Antigravity language server process via system commands (`Get-CimI
 
 ### Layer 2: CDP WebSocket
 
-Scans ports 8997–9014, 9222, and 9229 for an active Chrome DevTools Protocol endpoint. Fetches the target list via `/json/list`, filters for `page` and `webview` types, and evaluates a DOM click script on each target. The script uses a **webview guard** (checks for `.react-app-container` or `[class*="agent"]`) to only click buttons inside the Antigravity agent panel. Button text matching is **direct-text-only** (ignores child node text) to avoid false positives.
+Scans ports 8997–9014, 9222, and 9229 for an active Chrome DevTools Protocol endpoint. Fetches the target list via `/json/list`, filters for `page` and `webview` types, and evaluates an **async DOM script** on each target. The script first clicks Antigravity's built-in **"Scroll to bottom"** button (`button[aria-label="Scroll to bottom"]`), waits 300ms for the scroll animation, then scans and clicks Accept/Run/Allow buttons. This ensures off-screen buttons are always revealed before detection.
 
 ### Layer 3: VS Code Commands
 

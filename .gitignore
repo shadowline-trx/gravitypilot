@@ -1,0 +1,10 @@
+node_modules/
+out/
+*.vsix
+.vscode-test/
+*.map
+.DS_Store
+Thumbs.db
+extracted_*/
+mstrvn/
+test_accept.txt

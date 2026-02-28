@@ -83,7 +83,7 @@ const ACCEPT_CMDS = [
 export function activate(ctx: vscode.ExtensionContext) {
     try {
         out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-        log('v4.1.2 activated');
+        log('v4.2.0 activated');
         loadConfig();
 
         // Status bars
@@ -403,7 +403,24 @@ async function layer2_CDP() {
     const rejectPatterns = ['skip', 'reject', 'cancel', 'close', 'refine', 'always run'];
 
     const script = `
-(function() {
+(async function() {
+    // Step 1: Scroll to bottom to reveal hidden accept buttons
+    var scrollBtns = document.querySelectorAll('button[aria-label="Scroll to bottom"]');
+    var scrolled = 0;
+    for (var s = 0; s < scrollBtns.length; s++) {
+        var sb = scrollBtns[s];
+        try {
+            var sStyle = window.getComputedStyle(sb);
+            var sRect = sb.getBoundingClientRect();
+            if (sStyle.display !== 'none' && sRect.width > 0 && !sb.disabled) {
+                sb.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
+                scrolled++;
+            }
+        } catch(e) {}
+    }
+    if (scrolled > 0) await new Promise(function(r) { setTimeout(r, 300); });
+
+    // Step 2: Scan and click accept buttons
     var PATTERNS = ${JSON.stringify(allPatterns)};
     var REJECTS = ${JSON.stringify(rejectPatterns)};
     var clicked = 0;
@@ -630,7 +647,7 @@ function cdpEvaluate(ws: WebSocket, expression: string): Promise<any> {
     return new Promise((resolve, reject) => {
         if (ws.readyState !== WebSocket.OPEN) return reject(new Error('not open'));
         const id = cdpMsgId++;
-        const timeout = setTimeout(() => reject(new Error('timeout')), 2000);
+        const timeout = setTimeout(() => reject(new Error('timeout')), 4000);
         const onMessage = (data: WebSocket.Data) => {
             try {
                 const msg = JSON.parse(data.toString());
@@ -645,7 +662,7 @@ function cdpEvaluate(ws: WebSocket, expression: string): Promise<any> {
         ws.send(JSON.stringify({
             id,
             method: 'Runtime.evaluate',
-            params: { expression, userGesture: true, awaitPromise: false, returnByValue: true }
+            params: { expression, userGesture: true, awaitPromise: true, returnByValue: true }
         }));
     });
 }
