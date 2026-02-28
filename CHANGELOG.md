@@ -2,6 +2,12 @@
 
 All notable changes to GravityPilot are documented here.
 
+## [4.2.1] - 2026-02-28
+
+### Fixed
+
+- **Smart scroll (scan-first)**: Buttons already in the DOM are clicked immediately without scrolling — works even when the user has scrolled up to read. Scroll-to-bottom only fires as a fallback when zero buttons are found (handles virtual scrolling / off-DOM buttons). User's reading position is never disrupted while the agent is working
+
 ## [4.2.0] - 2026-02-28
 
 ### Added

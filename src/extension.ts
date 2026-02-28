@@ -83,7 +83,7 @@ const ACCEPT_CMDS = [
 export function activate(ctx: vscode.ExtensionContext) {
     try {
         out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-        log('v4.2.0 activated');
+        log('v4.2.1 activated');
         loadConfig();
 
         // Status bars
@@ -404,7 +404,33 @@ async function layer2_CDP() {
 
     const script = `
 (async function() {
-    // Step 1: Scroll to bottom to reveal hidden accept buttons
+    var PATTERNS = ${JSON.stringify(allPatterns)};
+    var REJECTS = ${JSON.stringify(rejectPatterns)};
+
+    // Step 1: Scan and click accept buttons already in the DOM (works off-screen too)
+    function scanButtons() {
+        var clicked = 0;
+        var buttons = document.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+            var btn = buttons[i];
+            var text = (btn.textContent || '').trim().toLowerCase();
+            if (!text || text.length > 50) continue;
+            if (btn.disabled) continue;
+            var style = window.getComputedStyle(btn);
+            var rect = btn.getBoundingClientRect();
+            if (style.display === 'none' || rect.width === 0 || style.pointerEvents === 'none') continue;
+            if (REJECTS.some(function(r) { return text.includes(r); })) continue;
+            if (!PATTERNS.some(function(p) { return text.includes(p); })) continue;
+            btn.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
+            clicked++;
+        }
+        return clicked;
+    }
+
+    var clicked = scanButtons();
+    if (clicked > 0) return clicked;
+
+    // Step 2: No buttons found — scroll to bottom to reveal unrendered ones
     var scrollBtns = document.querySelectorAll('button[aria-label="Scroll to bottom"]');
     var scrolled = 0;
     for (var s = 0; s < scrollBtns.length; s++) {
@@ -418,25 +444,10 @@ async function layer2_CDP() {
             }
         } catch(e) {}
     }
-    if (scrolled > 0) await new Promise(function(r) { setTimeout(r, 300); });
-
-    // Step 2: Scan and click accept buttons
-    var PATTERNS = ${JSON.stringify(allPatterns)};
-    var REJECTS = ${JSON.stringify(rejectPatterns)};
-    var clicked = 0;
-    var buttons = document.querySelectorAll('button');
-    for (var i = 0; i < buttons.length; i++) {
-        var btn = buttons[i];
-        var text = (btn.textContent || '').trim().toLowerCase();
-        if (!text || text.length > 50) continue;
-        if (btn.disabled) continue;
-        var style = window.getComputedStyle(btn);
-        var rect = btn.getBoundingClientRect();
-        if (style.display === 'none' || rect.width === 0 || style.pointerEvents === 'none') continue;
-        if (REJECTS.some(function(r) { return text.includes(r); })) continue;
-        if (!PATTERNS.some(function(p) { return text.includes(p); })) continue;
-        btn.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
-        clicked++;
+    if (scrolled > 0) {
+        await new Promise(function(r) { setTimeout(r, 300); });
+        // Re-scan after scrolling
+        clicked = scanButtons();
     }
     return clicked;
 })()`;
