@@ -83,7 +83,7 @@ const ACCEPT_CMDS = [
 export function activate(ctx: vscode.ExtensionContext) {
     try {
         out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-        log('v4.2.1 activated');
+        log('v4.2.2 activated');
         loadConfig();
 
         // Status bars
@@ -164,6 +164,14 @@ export function activate(ctx: vscode.ExtensionContext) {
                 try { ensureDebugPort(); } catch (e: any) {
                     log(`[CDP] ensureDebugPort failed: ${e?.message}`);
                 }
+                // Periodic health check: force re-discover every 2 minutes
+                // Catches silently dead WebSockets, account switches, port changes
+                setInterval(() => {
+                    if (enabled) {
+                        invalidateCaches('periodicHealth');
+                        if (state === State.IDLE) transitionTo(State.FAST, 'healthCheck');
+                    }
+                }, 120_000);
             }
         }
 
@@ -458,7 +466,12 @@ async function layer2_CDP() {
             if (result && result > 0) {
                 log(`[CDP] ✓ Clicked ${result} button(s) on ${id}`);
             }
-        } catch { /* target may have closed */ }
+        } catch {
+            // Connection dead — prune it so next cycle reconnects
+            log(`[CDP] Connection ${id} failed, removing`);
+            try { conn.ws.close(); } catch { }
+            cdpConnections.delete(id);
+        }
     }
 }
 
@@ -617,6 +630,15 @@ function cdpGetPages(port: number): Promise<any[]> {
 }
 
 async function cdpEnsureConnections() {
+    // Prune dead/stale connections first
+    for (const [id, conn] of cdpConnections) {
+        if (conn.ws.readyState !== WebSocket.OPEN) {
+            log(`[CDP] Pruning stale connection ${id} (readyState: ${conn.ws.readyState})`);
+            try { conn.ws.close(); } catch { }
+            cdpConnections.delete(id);
+        }
+    }
+
     const portsToTry = cdpPortFound ? [cdpPortFound, ...CDP_PORTS.filter(p => p !== cdpPortFound)] : CDP_PORTS;
 
     for (const port of portsToTry) {

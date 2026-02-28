@@ -2,6 +2,14 @@
 
 All notable changes to GravityPilot are documented here.
 
+## [4.2.2] - 2026-02-28
+
+### Fixed
+
+- **CDP recovery after minimize**: Stale WebSocket connections (silently dead after minimize/sleep) are now pruned on every cycle. If `readyState !== OPEN`, the connection is removed and a fresh one established
+- **Inline dead-connection pruning**: When `cdpEvaluate` fails on a specific target, that connection is immediately removed instead of being silently ignored — next cycle reconnects automatically
+- **Periodic health check (2-minute timer)**: Every 2 minutes, caches are invalidated and CDP/gRPC connections are re-discovered. Catches account switches, port changes, and silently dead WebSockets that no event detected
+
 ## [4.2.1] - 2026-02-28
 
 ### Fixed
