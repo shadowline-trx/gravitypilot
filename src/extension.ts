@@ -45,9 +45,11 @@ let events: vscode.Disposable[] = [];
 // CDP — persistent connections like mstrvn
 const CDP_PORTS = [9222, 9229, ...Array.from({ length: 7 }, (_, i) => 8997 + i)];
 let cdpPortFound: number | null = null;
-let cdpConnections: Map<string, { ws: WebSocket; id: string }> = new Map();
+let cdpConnections: Map<string, { ws: WebSocket; id: string; injected: boolean }> = new Map();
 let cdpMsgId = 1;
 let cdpReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let cdpFailCount = 0;
+let cdpRestartPrompted = false;
 
 // gRPC server cache
 let grpcServer: { port: number; csrfToken: string; useHttps: boolean } | null = null;
@@ -83,7 +85,7 @@ const ACCEPT_CMDS = [
 export function activate(ctx: vscode.ExtensionContext) {
     try {
         out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-        log('v4.2.2 activated');
+        log('v4.2.3 activated');
         loadConfig();
 
         // Status bars
@@ -256,6 +258,9 @@ function invalidateCaches(reason: string) {
     grpcCacheTime = 0;
     // Disconnect CDP so we reconnect to fresh targets
     cdpDisconnect();
+    // Reset CDP fail tracking so we try fresh
+    cdpFailCount = 0;
+    cdpRestartPrompted = false;
     log(`Caches invalidated (${reason})`);
 }
 
@@ -403,20 +408,44 @@ async function layer2_CDP() {
     // Ensure we have active connections
     await cdpEnsureConnections();
 
-    if (cdpConnections.size === 0) return;
+    if (cdpConnections.size === 0) {
+        cdpFailCount++;
+        if (cdpFailCount >= 5 && !cdpRestartPrompted) {
+            cdpRestartPrompted = true;
+            log('[CDP] No debug port found after 5 attempts — prompting restart');
+            statusBar.text = '$(warning) AG: NO CDP';
+            statusBar.tooltip = 'CDP debug port not active. Restart Antigravity to enable auto-accept.';
+            statusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+            vscode.window.showWarningMessage(
+                'GravityPilot: CDP debug port not found. Auto-accept needs Antigravity to be restarted to enable the debug port.',
+                'Restart Now'
+            ).then(choice => {
+                if (choice === 'Restart Now') {
+                    // argv.json already has the debug port — just restart to apply
+                    vscode.commands.executeCommand('workbench.action.reloadWindow');
+                }
+            });
+        }
+        return;
+    }
+    cdpFailCount = 0;
+    if (cdpRestartPrompted) {
+        cdpRestartPrompted = false;
+        updateStatusBar();
+    }
 
     const safePatterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'continue', 'proceed'];
     const unsafePatterns = godMode ? ['always allow', 'allow this conversation', 'allow'] : [];
     const allPatterns = [...safePatterns, ...unsafePatterns];
     const rejectPatterns = ['skip', 'reject', 'cancel', 'close', 'refine', 'always run'];
 
-    const script = `
-(async function() {
-    var PATTERNS = ${JSON.stringify(allPatterns)};
-    var REJECTS = ${JSON.stringify(rejectPatterns)};
+    // Persistent script: injected ONCE, runs its own internal loop
+    const persistentScript = `
+(function() {
+    if (window.__gpInjected) return;
+    window.__gpInjected = true;
 
-    // Step 1: Scan and click accept buttons already in the DOM (works off-screen too)
-    function scanButtons() {
+    function scanAndClick(PATTERNS, REJECTS) {
         var clicked = 0;
         var buttons = document.querySelectorAll('button');
         for (var i = 0; i < buttons.length; i++) {
@@ -424,9 +453,11 @@ async function layer2_CDP() {
             var text = (btn.textContent || '').trim().toLowerCase();
             if (!text || text.length > 50) continue;
             if (btn.disabled) continue;
-            var style = window.getComputedStyle(btn);
-            var rect = btn.getBoundingClientRect();
-            if (style.display === 'none' || rect.width === 0 || style.pointerEvents === 'none') continue;
+            try {
+                var style = window.getComputedStyle(btn);
+                var rect = btn.getBoundingClientRect();
+                if (style.display === 'none' || rect.width === 0 || style.pointerEvents === 'none') continue;
+            } catch(e) { continue; }
             if (REJECTS.some(function(r) { return text.includes(r); })) continue;
             if (!PATTERNS.some(function(p) { return text.includes(p); })) continue;
             btn.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
@@ -435,36 +466,62 @@ async function layer2_CDP() {
         return clicked;
     }
 
-    var clicked = scanButtons();
-    if (clicked > 0) return clicked;
+    function scrollToBottom() {
+        var scrollBtns = document.querySelectorAll('button[aria-label="Scroll to bottom"]');
+        var scrolled = 0;
+        for (var s = 0; s < scrollBtns.length; s++) {
+            var sb = scrollBtns[s];
+            try {
+                var sStyle = window.getComputedStyle(sb);
+                var sRect = sb.getBoundingClientRect();
+                if (sStyle.display !== 'none' && sRect.width > 0 && !sb.disabled) {
+                    sb.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
+                    scrolled++;
+                }
+            } catch(e) {}
+        }
+        return scrolled;
+    }
 
-    // Step 2: No buttons found — scroll to bottom to reveal unrendered ones
-    var scrollBtns = document.querySelectorAll('button[aria-label="Scroll to bottom"]');
-    var scrolled = 0;
-    for (var s = 0; s < scrollBtns.length; s++) {
-        var sb = scrollBtns[s];
+    // Internal autonomous loop — NEVER dies
+    function loop() {
         try {
-            var sStyle = window.getComputedStyle(sb);
-            var sRect = sb.getBoundingClientRect();
-            if (sStyle.display !== 'none' && sRect.width > 0 && !sb.disabled) {
-                sb.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
-                scrolled++;
+            if (!window.__gpConfig) { setTimeout(loop, 800); return; }
+            var P = window.__gpConfig.patterns;
+            var R = window.__gpConfig.rejects;
+
+            // Step 1: Try clicking buttons already in DOM
+            var clicked = scanAndClick(P, R);
+
+            // Step 2: If nothing found, scroll to bottom and retry
+            if (clicked === 0) {
+                var scrolled = scrollToBottom();
+                if (scrolled > 0) {
+                    setTimeout(function() { try { scanAndClick(P, R); } catch(e) {} }, 300);
+                }
             }
         } catch(e) {}
+
+        setTimeout(loop, 800);
     }
-    if (scrolled > 0) {
-        await new Promise(function(r) { setTimeout(r, 300); });
-        // Re-scan after scrolling
-        clicked = scanButtons();
-    }
-    return clicked;
+
+    loop();
+    console.log('[GravityPilot] Persistent script injected');
 })()`;
+
+    // Config update script: updates patterns without re-injecting
+    const configScript = `window.__gpConfig = { patterns: ${JSON.stringify(allPatterns)}, rejects: ${JSON.stringify(rejectPatterns)} }`;
 
     for (const [id, conn] of cdpConnections) {
         try {
-            const result = await cdpEvaluate(conn.ws, script);
-            if (result && result > 0) {
-                log(`[CDP] ✓ Clicked ${result} button(s) on ${id}`);
+            // Always push latest config (god mode changes, etc.)
+            await cdpEvaluate(conn.ws, configScript);
+
+            // Inject persistent script only once per connection
+            if (!conn.injected) {
+                await cdpEvaluate(conn.ws, persistentScript);
+                conn.injected = true;
+                log(`[CDP] Persistent script injected into ${id}`);
             }
         } catch {
             // Connection dead — prune it so next cycle reconnects
@@ -657,7 +714,7 @@ async function cdpEnsureConnections() {
                         const timeout = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 2000);
                         ws.on('open', () => {
                             clearTimeout(timeout);
-                            cdpConnections.set(id, { ws, id });
+                            cdpConnections.set(id, { ws, id, injected: false });
                             log(`[CDP] Connected to ${id}`);
                             resolve();
                         });
@@ -695,7 +752,7 @@ function cdpEvaluate(ws: WebSocket, expression: string): Promise<any> {
         ws.send(JSON.stringify({
             id,
             method: 'Runtime.evaluate',
-            params: { expression, userGesture: true, awaitPromise: true, returnByValue: true }
+            params: { expression, userGesture: true, awaitPromise: false, returnByValue: true }
         }));
     });
 }

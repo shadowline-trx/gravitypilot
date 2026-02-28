@@ -2,6 +2,14 @@
 
 All notable changes to GravityPilot are documented here.
 
+## [4.2.3] - 2026-02-28
+
+### Changed (Architecture)
+
+- **Injection model (mstrvn-style)**: CDP Layer 2 completely rewritten. Instead of evaluating a new script on every poll cycle (which fails when CDP drops), a persistent self-looping script is now injected ONCE into the browser page. The script runs its own 800ms scan loop autonomously — it continues clicking buttons even if the WebSocket connection drops, the window is minimized, or the account is switched
+- **Config hot-push**: God Mode / pattern changes are pushed to the injected script via a lightweight `__gpConfig` update without re-injection
+- **Injection guard**: `window.__gpInjected` flag prevents duplicate injection
+
 ## [4.2.2] - 2026-02-28
 
 ### Fixed
