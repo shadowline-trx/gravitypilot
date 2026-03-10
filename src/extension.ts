@@ -86,7 +86,7 @@ const ACCEPT_CMDS = [
 export function activate(ctx: vscode.ExtensionContext) {
     try {
         out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-        log('v4.3.0 activated');
+        log('v4.3.1 activated');
         loadConfig();
 
         // Status bars
@@ -415,28 +415,35 @@ async function layer2_CDP() {
             cdpRestartPrompted = true;
             log('[CDP] No debug port found after 5 attempts — prompting restart');
             statusBar.text = '$(warning) AG: NO CDP';
-            statusBar.tooltip = 'CDP debug port not active. Restart Antigravity to enable auto-accept.';
+            statusBar.tooltip = 'CDP debug port not active. Close AG and reopen with debug port to enable auto-accept.';
             statusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             vscode.window.showWarningMessage(
-                'GravityPilot: CDP debug port not found. Auto-accept needs Antigravity to be restarted to enable the debug port.',
-                'Restart Now'
+                'GravityPilot: CDP debug port not active. AG needs to be closed and reopened with the debug flag. Click "Fix & Restart" to do this automatically.',
+                'Fix & Restart'
             ).then(async choice => {
-                if (choice === 'Restart Now') {
-                    // argv.json already has the debug port — need full AG process restart
-                    log('[CDP] User requested restart — killing AG process and relaunching');
+                if (choice === 'Fix & Restart') {
+                    log('[CDP] User requested Fix & Restart');
                     try {
-                        const agExe = process.execPath; // path to the AG executable
-                        const cwd = process.cwd();
-                        // Kill all AG processes and relaunch
+                        const agExe = process.execPath;
+                        const port = cfg.cdpPort;
                         if (process.platform === 'win32') {
                             const exeName = path.basename(agExe);
-                            await execAsync(`taskkill /IM "${exeName}" /F & timeout /t 2 & start "" "${agExe}"`, { timeout: 15000 });
+                            // Kill AG, wait, then relaunch WITH the debug flag
+                            await execAsync(
+                                `start /b cmd /c "taskkill /IM \"${exeName}\" /F & timeout /t 3 /nobreak >nul & start \"\" \"${agExe}\" --remote-debugging-port=${port}"`,
+                                { timeout: 5000 }
+                            ).catch(() => {});
                         } else {
-                            await execAsync(`kill -9 ${process.pid} && sleep 2 && "${agExe}" &`, { timeout: 15000 });
+                            await execAsync(
+                                `kill ${process.pid} && sleep 2 && "${agExe}" --remote-debugging-port=${port} &`,
+                                { timeout: 5000 }
+                            ).catch(() => {});
                         }
                     } catch (e: any) {
-                        log(`[CDP] Restart failed: ${e?.message}. Falling back to window reload.`);
-                        vscode.commands.executeCommand('workbench.action.reloadWindow');
+                        log(`[CDP] Fix & Restart failed: ${e?.message}`);
+                        vscode.window.showErrorMessage(
+                            `GravityPilot: Auto-restart failed. Please close AG manually and reopen it from terminal with: Antigravity.exe --remote-debugging-port=${cfg.cdpPort}`
+                        );
                     }
                 }
             });
@@ -800,32 +807,32 @@ async function ensureDebugPort(): Promise<number | null> {
     const argvPath = fs.existsSync(agPath) ? agPath : fs.existsSync(vsPath) ? vsPath : agPath;
 
     try {
+        // Step 1: Write argv.json (works for older AG versions)
         let data: any = {};
         if (fs.existsSync(argvPath)) {
             const raw = fs.readFileSync(argvPath, 'utf8');
-            // Strip // comments for JSON parsing
             const cleaned = raw.replace(/\/\/.*$/gm, '');
             data = JSON.parse(cleaned);
         }
-        if (data['remote-debugging-port']) {
-            log(`[CDP] Debug port already set: ${data['remote-debugging-port']}`);
-            return data['remote-debugging-port'];
+        if (!data['remote-debugging-port']) {
+            data['remote-debugging-port'] = port;
+            const dir = path.dirname(argvPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(argvPath, JSON.stringify(data, null, 2), 'utf8');
+            log(`[CDP] Wrote debug port ${port} to ${argvPath}`);
         }
 
-        data['remote-debugging-port'] = port;
-        const dir = path.dirname(argvPath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(argvPath, JSON.stringify(data, null, 2), 'utf8');
-        log(`[CDP] Wrote debug port ${port} to ${argvPath}`);
+        // Step 2: Check if the current process already has the debug port active
+        const cmdline = process.argv.join(' ');
+        if (cmdline.includes('remote-debugging-port')) {
+            log(`[CDP] Debug port flag already active in process args`);
+            return port;
+        }
 
-        const action = await vscode.window.showInformationMessage(
-            'AG Auto-Accept: CDP configured. Restart IDE for full button acceptance.',
-            'Restart Now', 'Later'
-        );
-        if (action === 'Restart Now') vscode.commands.executeCommand('workbench.action.reloadWindow');
+        log(`[CDP] Debug port ${port} configured in argv.json but may need AG restart with --remote-debugging-port=${port}`);
         return null;
     } catch (e: any) {
-        log(`[CDP] argv.json error: ${e?.message}`);
+        log(`[CDP] ensureDebugPort error: ${e?.message}`);
         return null;
     }
 }

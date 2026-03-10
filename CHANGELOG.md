@@ -2,6 +2,13 @@
 
 All notable changes to GravityPilot are documented here.
 
+## [4.3.1] - 2026-03-10
+
+### Fixed
+
+- **AG v1.20.5 compatibility**: AG v1.20.5 no longer reads `argv.json` for the debug port flag. "Fix & Restart" now kills AG via `taskkill` and relaunches with `--remote-debugging-port=9222` passed directly on the command line
+- **Better error fallback**: If auto-restart fails, shows the exact manual launch command to the user
+
 ## [4.3.0] - 2026-03-10
 
 ### Fixed
