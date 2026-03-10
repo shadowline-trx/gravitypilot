@@ -51,6 +51,8 @@ let cdpMsgId = 1;
 let cdpReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let cdpFailCount = 0;
 let cdpRestartPrompted = false;
+let cdpNotifyCount = 0;
+const CDP_MAX_NOTIFY = 3;
 
 // gRPC server cache
 let grpcServer: { port: number; csrfToken: string; useHttps: boolean } | null = null;
@@ -86,7 +88,7 @@ const ACCEPT_CMDS = [
 export function activate(ctx: vscode.ExtensionContext) {
     try {
         out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-        log('v4.3.1 activated');
+        log('v4.3.2 activated');
         loadConfig();
 
         // Status bars
@@ -262,6 +264,7 @@ function invalidateCaches(reason: string) {
     // Reset CDP fail tracking so we try fresh
     cdpFailCount = 0;
     cdpRestartPrompted = false;
+    cdpNotifyCount = 0;
     log(`Caches invalidated (${reason})`);
 }
 
@@ -411,42 +414,30 @@ async function layer2_CDP() {
 
     if (cdpConnections.size === 0) {
         cdpFailCount++;
-        if (cdpFailCount >= 5 && !cdpRestartPrompted) {
-            cdpRestartPrompted = true;
-            log('[CDP] No debug port found after 5 attempts — prompting restart');
-            statusBar.text = '$(warning) AG: NO CDP';
-            statusBar.tooltip = 'CDP debug port not active. Close AG and reopen with debug port to enable auto-accept.';
-            statusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-            vscode.window.showWarningMessage(
-                'GravityPilot: CDP debug port not active. AG needs to be closed and reopened with the debug flag. Click "Fix & Restart" to do this automatically.',
-                'Fix & Restart'
-            ).then(async choice => {
-                if (choice === 'Fix & Restart') {
-                    log('[CDP] User requested Fix & Restart');
-                    try {
-                        const agExe = process.execPath;
-                        const port = cfg.cdpPort;
-                        if (process.platform === 'win32') {
-                            const exeName = path.basename(agExe);
-                            // Kill AG, wait, then relaunch WITH the debug flag
-                            await execAsync(
-                                `start /b cmd /c "taskkill /IM \"${exeName}\" /F & timeout /t 3 /nobreak >nul & start \"\" \"${agExe}\" --remote-debugging-port=${port}"`,
-                                { timeout: 5000 }
-                            ).catch(() => {});
-                        } else {
-                            await execAsync(
-                                `kill ${process.pid} && sleep 2 && "${agExe}" --remote-debugging-port=${port} &`,
-                                { timeout: 5000 }
-                            ).catch(() => {});
-                        }
-                    } catch (e: any) {
-                        log(`[CDP] Fix & Restart failed: ${e?.message}`);
-                        vscode.window.showErrorMessage(
-                            `GravityPilot: Auto-restart failed. Please close AG manually and reopen it from terminal with: Antigravity.exe --remote-debugging-port=${cfg.cdpPort}`
-                        );
+        if (cdpFailCount >= 10 && !cdpRestartPrompted) {
+            // Show notification up to 3 times
+            if (cdpNotifyCount < CDP_MAX_NOTIFY) {
+                cdpNotifyCount++;
+                log(`[CDP] No debug port found after ${cdpFailCount} attempts — notification ${cdpNotifyCount}/${CDP_MAX_NOTIFY}`);
+                statusBar.text = '$(warning) AG: NO CDP';
+                statusBar.tooltip = 'CDP debug port not active. Close and reopen AG to enable auto-accept.';
+                statusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+
+                // Auto-fix shortcuts silently in the background (only first time)
+                if (cdpNotifyCount === 1) fixAgShortcuts(cfg.cdpPort);
+
+                vscode.window.showWarningMessage(
+                    `GravityPilot (${cdpNotifyCount}/${CDP_MAX_NOTIFY}): Shortcuts updated with debug port. Close AG completely and reopen from shortcut for auto-accept to work.`,
+                    'OK', 'Ignore'
+                ).then(choice => {
+                    if (choice === 'Ignore') {
+                        cdpRestartPrompted = true; // stop future notifications
+                        log('[CDP] User chose to ignore CDP notifications');
                     }
-                }
-            });
+                });
+            } else {
+                cdpRestartPrompted = true; // 3 notifications shown, stop
+            }
         }
         return;
     }
@@ -724,13 +715,40 @@ async function cdpEnsureConnections() {
         }
     }
 
-    const portsToTry = cdpPortFound ? [cdpPortFound, ...CDP_PORTS.filter(p => p !== cdpPortFound)] : CDP_PORTS;
+    // Strategy 1: Try known/cached port first, then hardcoded ports
+    const portsToTry = cdpPortFound ? [cdpPortFound, ...CDP_PORTS.filter(p => p !== cdpPortFound)] : [...CDP_PORTS];
+
+    // Strategy 2: Discover AG process ports dynamically
+    try {
+        if (process.platform === 'win32') {
+            const { stdout } = await execAsync(
+                'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name=\'Antigravity.exe\'\\" | Select-Object -Expand ProcessId"',
+                { timeout: 3000 }
+            );
+            const agPids = stdout.split(/\r?\n/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            if (agPids.length > 0) {
+                const { stdout: netstatOut } = await execAsync('netstat -ano', { timeout: 5000 });
+                for (const line of netstatOut.split(/\r?\n/)) {
+                    const parts = line.trim().split(/\s+/);
+                    if (parts.length < 5 || parts[0] !== 'TCP' || parts[3] !== 'LISTENING') continue;
+                    const pid = parseInt(parts[4]);
+                    if (!agPids.includes(pid)) continue;
+                    const portMatch = parts[1].match(/:(\d+)$/);
+                    if (portMatch) {
+                        const dynPort = parseInt(portMatch[1]);
+                        if (!portsToTry.includes(dynPort)) portsToTry.push(dynPort);
+                    }
+                }
+            }
+        }
+    } catch { /* dynamic scan failed, continue with static ports */ }
 
     for (const port of portsToTry) {
         try {
             const pages = await cdpGetPages(port);
             if (pages.length === 0) continue;
             cdpPortFound = port;
+            log(`[CDP] Found CDP on port ${port}`);
 
             for (const page of pages) {
                 const id = `${port}:${page.id}`;
@@ -796,8 +814,77 @@ function cdpDisconnect() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// Auto CDP Port Setup (argv.json)
+// Auto CDP Port Setup — shortcut modification + argv.json
 // ══════════════════════════════════════════════════════════════════
+
+function fixAgShortcuts(port: number) {
+    if (process.platform !== 'win32') {
+        log('[CDP] Shortcut fix only supported on Windows');
+        return;
+    }
+
+    const script = `
+$ErrorActionPreference = "SilentlyContinue"
+$WshShell = New-Object -ComObject WScript.Shell
+$foundShortcuts = @()
+$searchLocations = @(
+    [Environment]::GetFolderPath('Desktop'),
+    "$env:USERPROFILE\\Desktop",
+    "$env:USERPROFILE\\OneDrive\\Desktop",
+    "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs",
+    "$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs",
+    "$env:USERPROFILE\\AppData\\Roaming\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar"
+)
+foreach ($location in $searchLocations) {
+    if (Test-Path $location) {
+        $shortcuts = Get-ChildItem -Path $location -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*Antigravity*" }
+        if ($shortcuts) { $foundShortcuts += $shortcuts }
+    }
+}
+if ($foundShortcuts.Count -eq 0) {
+    $exePath = "$env:LOCALAPPDATA\\Programs\\Antigravity\\Antigravity.exe"
+    if (Test-Path $exePath) {
+        $desktopPath = [Environment]::GetFolderPath('Desktop')
+        $shortcutPath = "$desktopPath\\Antigravity.lnk"
+        $shortcut = $WshShell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $exePath
+        $shortcut.Arguments = "--remote-debugging-port=${port}"
+        $shortcut.Save()
+    }
+} else {
+    foreach ($shortcutFile in $foundShortcuts) {
+        $shortcut = $WshShell.CreateShortcut($shortcutFile.FullName)
+        $originalArgs = $shortcut.Arguments
+        if ($originalArgs -match "--remote-debugging-port=\\d+") {
+            $shortcut.Arguments = $originalArgs -replace "--remote-debugging-port=\\d+", "--remote-debugging-port=${port}"
+        } else {
+            $shortcut.Arguments = "--remote-debugging-port=${port} " + $originalArgs
+        }
+        $shortcut.Save()
+    }
+}
+exit 0
+`;
+
+    const tmpScript = path.join(os.tmpdir(), 'gp-cdp-setup.ps1');
+    try {
+        fs.writeFileSync(tmpScript, script, 'utf8');
+        const ps = (require('child_process') as typeof import('child_process')).spawn('powershell.exe', [
+            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', tmpScript
+        ], { windowsHide: true, stdio: 'ignore', detached: true });
+        ps.unref();
+        ps.on('exit', () => {
+            try { fs.unlinkSync(tmpScript); } catch { }
+            log('[CDP] Shortcuts updated with debug port');
+        });
+        ps.on('error', (e) => {
+            log(`[CDP] Shortcut fix failed: ${e.message}`);
+        });
+    } catch (e: any) {
+        log(`[CDP] fixAgShortcuts error: ${e?.message}`);
+    }
+}
 
 async function ensureDebugPort(): Promise<number | null> {
     const port = cfg.cdpPort;
