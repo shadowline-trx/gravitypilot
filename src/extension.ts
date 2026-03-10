@@ -413,39 +413,16 @@ async function layer2_CDP() {
     await cdpEnsureConnections();
 
     if (cdpConnections.size === 0) {
+        // CDP not available — silently log and let Layers 1/3 handle it
         cdpFailCount++;
-        if (cdpFailCount >= 10 && !cdpRestartPrompted) {
-            // Show notification up to 3 times
-            if (cdpNotifyCount < CDP_MAX_NOTIFY) {
-                cdpNotifyCount++;
-                log(`[CDP] No debug port found after ${cdpFailCount} attempts — notification ${cdpNotifyCount}/${CDP_MAX_NOTIFY}`);
-                statusBar.text = '$(warning) AG: NO CDP';
-                statusBar.tooltip = 'CDP debug port not active. Close and reopen AG to enable auto-accept.';
-                statusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-
-                // Auto-fix shortcuts silently in the background (only first time)
-                if (cdpNotifyCount === 1) fixAgShortcuts(cfg.cdpPort);
-
-                vscode.window.showWarningMessage(
-                    `GravityPilot (${cdpNotifyCount}/${CDP_MAX_NOTIFY}): Shortcuts updated with debug port. Close AG completely and reopen from shortcut for auto-accept to work.`,
-                    'OK', 'Ignore'
-                ).then(choice => {
-                    if (choice === 'Ignore') {
-                        cdpRestartPrompted = true; // stop future notifications
-                        log('[CDP] User chose to ignore CDP notifications');
-                    }
-                });
-            } else {
-                cdpRestartPrompted = true; // 3 notifications shown, stop
-            }
+        if (cdpFailCount === 10) {
+            log('[CDP] No debug port found after 10 attempts. CDP layer disabled for this session. gRPC + VS Code commands will handle auto-accept.');
+            // One-time silent shortcut fix (no notification)
+            fixAgShortcuts(cfg.cdpPort);
         }
         return;
     }
     cdpFailCount = 0;
-    if (cdpRestartPrompted) {
-        cdpRestartPrompted = false;
-        updateStatusBar();
-    }
 
     const safePatterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'continue', 'proceed'];
     const unsafePatterns = godMode ? ['always allow', 'allow this conversation', 'allow'] : [];
