@@ -45,7 +45,8 @@ let events: vscode.Disposable[] = [];
 // CDP — persistent connections like mstrvn
 const CDP_PORTS = [9222, 9229, ...Array.from({ length: 7 }, (_, i) => 8997 + i)];
 let cdpPortFound: number | null = null;
-let cdpConnections: Map<string, { ws: WebSocket; id: string; injected: boolean }> = new Map();
+let cdpConnections: Map<string, { ws: WebSocket; id: string; injected: boolean; connectedAt: number }> = new Map();
+const CDP_MAX_AGE_MS = 600_000; // 10 minutes — force reconnect after this
 let cdpMsgId = 1;
 let cdpReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let cdpFailCount = 0;
@@ -85,7 +86,7 @@ const ACCEPT_CMDS = [
 export function activate(ctx: vscode.ExtensionContext) {
     try {
         out = vscode.window.createOutputChannel('AG Super Auto-Accept');
-        log('v4.2.3 activated');
+        log('v4.3.0 activated');
         loadConfig();
 
         // Status bars
@@ -166,14 +167,14 @@ export function activate(ctx: vscode.ExtensionContext) {
                 try { ensureDebugPort(); } catch (e: any) {
                     log(`[CDP] ensureDebugPort failed: ${e?.message}`);
                 }
-                // Periodic health check: force re-discover every 2 minutes
+                // Periodic health check: force re-discover every 90 seconds
                 // Catches silently dead WebSockets, account switches, port changes
                 setInterval(() => {
                     if (enabled) {
                         invalidateCaches('periodicHealth');
                         if (state === State.IDLE) transitionTo(State.FAST, 'healthCheck');
                     }
-                }, 120_000);
+                }, 90_000);
             }
         }
 
@@ -419,10 +420,24 @@ async function layer2_CDP() {
             vscode.window.showWarningMessage(
                 'GravityPilot: CDP debug port not found. Auto-accept needs Antigravity to be restarted to enable the debug port.',
                 'Restart Now'
-            ).then(choice => {
+            ).then(async choice => {
                 if (choice === 'Restart Now') {
-                    // argv.json already has the debug port — just restart to apply
-                    vscode.commands.executeCommand('workbench.action.reloadWindow');
+                    // argv.json already has the debug port — need full AG process restart
+                    log('[CDP] User requested restart — killing AG process and relaunching');
+                    try {
+                        const agExe = process.execPath; // path to the AG executable
+                        const cwd = process.cwd();
+                        // Kill all AG processes and relaunch
+                        if (process.platform === 'win32') {
+                            const exeName = path.basename(agExe);
+                            await execAsync(`taskkill /IM "${exeName}" /F & timeout /t 2 & start "" "${agExe}"`, { timeout: 15000 });
+                        } else {
+                            await execAsync(`kill -9 ${process.pid} && sleep 2 && "${agExe}" &`, { timeout: 15000 });
+                        }
+                    } catch (e: any) {
+                        log(`[CDP] Restart failed: ${e?.message}. Falling back to window reload.`);
+                        vscode.commands.executeCommand('workbench.action.reloadWindow');
+                    }
                 }
             });
         }
@@ -687,11 +702,17 @@ function cdpGetPages(port: number): Promise<any[]> {
 }
 
 async function cdpEnsureConnections() {
-    // Prune dead/stale connections first
+    const now = Date.now();
+    // Prune dead/stale connections AND age-expired connections
     for (const [id, conn] of cdpConnections) {
+        const age = now - conn.connectedAt;
         if (conn.ws.readyState !== WebSocket.OPEN) {
-            log(`[CDP] Pruning stale connection ${id} (readyState: ${conn.ws.readyState})`);
+            log(`[CDP] Pruning dead connection ${id} (readyState: ${conn.ws.readyState})`);
             try { conn.ws.close(); } catch { }
+            cdpConnections.delete(id);
+        } else if (age > CDP_MAX_AGE_MS) {
+            log(`[CDP] Recycling aged connection ${id} (${Math.round(age / 60000)}min old)`);
+            try { conn.ws.removeAllListeners(); conn.ws.close(); } catch { }
             cdpConnections.delete(id);
         }
     }
@@ -714,7 +735,7 @@ async function cdpEnsureConnections() {
                         const timeout = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 2000);
                         ws.on('open', () => {
                             clearTimeout(timeout);
-                            cdpConnections.set(id, { ws, id, injected: false });
+                            cdpConnections.set(id, { ws, id, injected: false, connectedAt: Date.now() });
                             log(`[CDP] Connected to ${id}`);
                             resolve();
                         });
@@ -737,13 +758,13 @@ function cdpEvaluate(ws: WebSocket, expression: string): Promise<any> {
     return new Promise((resolve, reject) => {
         if (ws.readyState !== WebSocket.OPEN) return reject(new Error('not open'));
         const id = cdpMsgId++;
-        const timeout = setTimeout(() => reject(new Error('timeout')), 4000);
+        const cleanup = () => { ws.off('message', onMessage); clearTimeout(timer); };
+        const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 4000);
         const onMessage = (data: WebSocket.Data) => {
             try {
                 const msg = JSON.parse(data.toString());
                 if (msg.id === id) {
-                    ws.off('message', onMessage);
-                    clearTimeout(timeout);
+                    cleanup();
                     resolve(msg.result?.result?.value);
                 }
             } catch { }
@@ -759,11 +780,12 @@ function cdpEvaluate(ws: WebSocket, expression: string): Promise<any> {
 
 function cdpDisconnect() {
     if (cdpReconnectTimer) { clearTimeout(cdpReconnectTimer); cdpReconnectTimer = null; }
-    for (const [id, conn] of cdpConnections) {
-        try { conn.ws.close(); } catch { }
+    for (const [, conn] of cdpConnections) {
+        try { conn.ws.removeAllListeners(); conn.ws.close(); } catch { }
     }
     cdpConnections.clear();
     cdpPortFound = null;
+    cdpMsgId = 1; // reset to prevent unbounded growth
 }
 
 // ══════════════════════════════════════════════════════════════════

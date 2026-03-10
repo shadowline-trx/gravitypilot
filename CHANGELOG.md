@@ -2,6 +2,16 @@
 
 All notable changes to GravityPilot are documented here.
 
+## [4.3.0] - 2026-03-10
+
+### Fixed
+
+- **Proper AG restart**: "Restart Now" button now kills the entire Antigravity process via `taskkill` and relaunches it, instead of just reloading the extension host window (which didn't re-apply the debug port flag)
+- **Memory leak in cdpEvaluate**: Timeout handler now properly removes the `onMessage` listener. Previously, timed-out listeners accumulated on the WebSocket — causing memory growth and degradation over 4-5 hour sessions
+- **Connection age recycling**: CDP connections now track creation time and are force-recycled after 10 minutes. Prevents stale connections from accumulating in long multi-window sessions
+- **Clean teardown**: `cdpDisconnect()` now calls `removeAllListeners()` on every WebSocket and resets `cdpMsgId` counter
+- **Faster health checks**: Reduced from 2 minutes to 90 seconds for more responsive recovery after account switches
+
 ## [4.2.3] - 2026-02-28
 
 ### Changed (Architecture)
